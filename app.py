@@ -304,10 +304,16 @@ with tab_results:
         st.markdown('<div class="card">โมเดลสุดท้าย = Decision Tree</div>', unsafe_allow_html=True)
 
     st.markdown("#### Classification Report (test)")
-    st.text(classification_report(y_test, y_pred, digits=4))
+    st.text(classification_report(
+        y_test,
+        y_pred,
+        labels=[0, 1],
+        digits=4,
+        zero_division=0
+    ))
 
     st.markdown("#### Confusion Matrix (test)")
-    cm = confusion_matrix(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
     st.dataframe(pd.DataFrame(cm, index=["Actual 0","Actual 1"], columns=["Pred 0","Pred 1"]), use_container_width=True)
 
     # Feature importances (หลังเข้ารหัส)
