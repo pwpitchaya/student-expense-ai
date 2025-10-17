@@ -403,3 +403,126 @@ with st.expander("ข้อมูลเพิ่มเติมเกี่ย�
 - โหลดผลใหม่ทันทีเมื่อมีการปรับค่าทางแถบด้านซ้าย
         """
     )
+# ===================== Tab: Predict =====================
+tab_predict = st.tabs(["🔮 ทำนาย (ป้อนค่าทีละรายการ)"])[0]
+with tab_predict:
+    st.subheader("ทำนายจากการป้อนค่าด้วยตนเอง")
+    st.caption("ใส่ค่าฟีเจอร์ตามช่องด้านล่าง แล้วกดปุ่มเพื่อทำนายผล (ใช้โมเดลที่ดีที่สุดจากหน้า 🏁 สรุป)")
+
+    # เตรียมตัวเลือกสำหรับฟอร์ม (อิงจากข้อมูลจริงใน df)
+    ui_cols_left, ui_cols_right = st.columns(2)
+    user_inputs = {}
+
+    for i, col in enumerate(features_selected):
+        series = df[col]
+        if series.dtype.kind in "biufc":  # numeric
+            v_min = float(np.nanmin(series)) if np.isfinite(series).any() else 0.0
+            v_max = float(np.nanmax(series)) if np.isfinite(series).any() else 100.0
+            v_med = float(np.nanmedian(series.dropna())) if series.notna().any() else 0.0
+            target_col_ui = ui_cols_left if i % 2 == 0 else ui_cols_right
+            with target_col_ui:
+                user_inputs[col] = st.number_input(
+                    f"{col} (ตัวเลข)",
+                    value=v_med,
+                    min_value=v_min,
+                    max_value=v_max,
+                    step=(max((v_max - v_min) / 100, 1.0))
+                )
+        else:  # categorical
+            # ใช้ค่าที่พบในข้อมูลจริงเป็นตัวเลือก
+            choices = sorted([str(x) for x in series.dropna().unique().tolist()])
+            default_idx = 0 if choices else None
+            target_col_ui = ui_cols_left if i % 2 == 0 else ui_cols_right
+            with target_col_ui:
+                user_inputs[col] = st.selectbox(
+                    f"{col} (เชิงหมวดหมู่)",
+                    options=choices if choices else ["N/A"],
+                    index=default_idx if default_idx is not None else 0
+                )
+
+    # ปุ่มทำนาย
+    # ปุ่มทำนาย
+    if st.button("ทำนายเลย 🔮"):
+        # แปลงเป็น DataFrame 1 แถว
+        X_one = pd.DataFrame([user_inputs], columns=features_selected)
+        # ทำนาย
+        pred_class = final_pipe.predict(X_one)[0]
+        prob = None
+        if hasattr(final_pipe.named_steps["clf"], "predict_proba"):
+            prob = final_pipe.predict_proba(X_one)[0, int(pred_class)]
+
+        # แสดงผลแบบการ์ดสี
+        st.markdown("---")
+        st.subheader("ผลการทำนาย 💬")
+
+        if int(pred_class) == 1:
+            # ใช้จ่ายสูง
+            st.markdown(f"""
+            <div style="
+                background-color:#fee2e2;
+                border-left:8px solid #dc2626;
+                padding:1rem 1.5rem;
+                border-radius:10px;
+                margin-bottom:1rem;">
+                <h3 style="color:#b91c1c;">🔺 ผลการทำนาย: นักศึกษานี้ <b>ใช้จ่ายสูง</b></h3>
+                <p style="color:#7f1d1d; font-size:15px; margin-top:4px;">
+                ค่าใช้จ่ายต่อเดือนของนักศึกษาคนนี้สูงกว่าค่า threshold ที่กำหนด<br>
+                <b>ความมั่นใจของโมเดล:</b> {prob:.2f} ({prob*100:.1f}%)
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # ใช้จ่ายปกติ
+            st.markdown(f"""
+            <div style="
+                background-color:#dcfce7;
+                border-left:8px solid #16a34a;
+                padding:1rem 1.5rem;
+                border-radius:10px;
+                margin-bottom:1rem;">
+                <h3 style="color:#166534;">🟢 ผลการทำนาย: นักศึกษานี้ <b>ใช้จ่ายปกติ</b></h3>
+                <p style="color:#14532d; font-size:15px; margin-top:4px;">
+                ค่าใช้จ่ายต่อเดือนอยู่ในเกณฑ์ปกติ (ต่ำกว่า threshold)<br>
+                <b>ความมั่นใจของโมเดล:</b> {prob:.2f} ({prob*100:.1f}%)
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.subheader("ทำนายแบบกลุ่ม (Batch Prediction จาก CSV)")
+    st.caption("อัปโหลด CSV ที่มีคอลัมน์ฟีเจอร์เหมือนกับที่เลือกใช้ แล้วระบบจะคืนผลทำนายให้ดาวน์โหลด")
+
+    up = st.file_uploader("อัปโหลดไฟล์ CSV สำหรับทำนาย", type=["csv"], key="predict_csv")
+    if up is not None:
+        try:
+            df_new = pd.read_csv(up)
+            # เช็คว่ามีทุกฟีเจอร์ที่ต้องใช้
+            missing = [c for c in features_selected if c not in df_new.columns]
+            if missing:
+                st.error(f"คอลัมน์ในไฟล์ขาดหาย: {missing}")
+            else:
+                X_new = df_new[features_selected].copy()
+                preds = final_pipe.predict(X_new)
+                probs = None
+                if hasattr(final_pipe.named_steps["clf"], "predict_proba"):
+                    probs = final_pipe.predict_proba(X_new)[:,1]  # โอกาสเป็นคลาส 1
+
+                out = df_new.copy()
+                out["pred_label"] = preds
+                if probs is not None:
+                    out["pred_prob_1"] = probs
+
+                st.success(f"ทำนายเสร็จแล้ว {len(out)} แถว")
+                st.dataframe(out.head(20), use_container_width=True)
+
+                # ปุ่มดาวน์โหลดผล
+                csv_bytes = out.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ ดาวน์โหลดไฟล์ผลทำนาย (CSV)",
+                    data=csv_bytes,
+                    file_name="predictions.csv",
+                    mime="text/csv"
+                )
+        except Exception as e:
+            st.error(f"อ่านไฟล์/ทำนายไม่สำเร็จ: {e}")
+
